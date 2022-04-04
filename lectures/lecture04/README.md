@@ -112,7 +112,7 @@ spring:
 public class Student {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.AUTO)
+    @GeneratedValue(strategy = GenerationType.SEQUENCE)
     private int id;
 
     @Column(name = "first_name")
@@ -161,7 +161,7 @@ Lombok преобразует аннотации в исходном коде в
 public class Student {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.AUTO)
+    @GeneratedValue(strategy = GenerationType.SEQUENCE)
     private int id;
 
     @Column(name = "first_name")
@@ -226,7 +226,7 @@ public class Controller {
 public class Group {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.AUTO)
+    @GeneratedValue(strategy = GenerationType.SEQUENCE)
     private int id;
     private String name;
 
@@ -285,154 +285,603 @@ public class Service {
   <img src="img/img_05.png" />
 </p>
 
-### Реализация отношения "один-ко-многим"
+### Моделирование реляционных отношений
 
-Как мы знаем, важной составляющей реляционных баз данных является отношения между таблицами "один-к-одному", "один-ко-многим", "многие-ко-многим".
+Между двумя или более таблицами базы данных могут существовать отношения подчиненности. Отношения подчиненности определяют, что для каждой записи главной таблицы (родительской или master) может существовать одна или несколько записей в подчиненной таблице (дочерней или detail).
 
-Реализуем отношение "один-ко-многим". Создадим сущность `Group` - студенческая группа. В студенческой группе может быть от 0 до N студентов.
+Существуют три разновидности связей между таблицами базы данных:
 
-Прежде всего перейдем в сущность `Student`. Добавим поле `group`, который будет ссылаться на студенческую группу, в которой будет состоять студент. Так как в группе может быть много студентов, указываем аннотацию `@ManyToOne`. Также указываем аннотацию `@JoinColumn`, которая указывает на имя колонки, которая будет содержать Foreign Key.
+- "один-к-одному";
+- "один-ко-многим";
+- "многие-ко-многим".
 
-**Технология ORM позволяет создавать двусторонние связи между таблицами. В этом случае, при выдаче JSON, может возникнуть бесконечный цикл. Чтобы его избежать, укажем аннотацию `@JsonIgnore`. В этом случае, колонка group будет проигнорирована в процессе сериализации\десериализации.**
+#### Реализация отношения "один-к-одному"
+
+Отношение "один-к-одному" имеет место, когда одной записи в родительской таблице соответствует одна запись в дочерней таблице.
+
+Реализуем в нашем примере отношение "один-к-одному" с помощью внешнего ключа.
+
+У нас есть сущность `Student`, создадим еще одну сущность `StudentInfo`, которая будет хранить личное дело студента. Для примера создадим несколько полей в этой сущности
 
 ```java
+
 @Entity
+@Table(name = "student_info")
 @Data
-@AllArgsConstructor
-@NoArgsConstructor
-public class Student {
+public class StudentInfo {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.SEQUENCE)
     private int id;
-    private String firstname;
-    private String lastname;
-    private int age;
 
-    @ManyToOne (fetch = FetchType.LAZY,optional = false)
-    @JoinColumn(name = "group_id",nullable = false)
-    @JsonIgnore
-    private Group group;
+    @Column(name = "speciality")
+    private String speciality;
+
+    @Column(name = "department")
+    private String department;
 }
 ```
 
-Далее создадим сущность `Group`.
+Теперь перейдем в сущность `Student`. Таблица `students` будет являться родительской таблицей, поэтому чтобы создать связь, мы должны сделать следующее - мы должны добавить поле типа `StudentInfo` в сущность `Student`, после чего указать с помощью аннотаций тип связи и ее параметры.
+
+```java
+@Entity
+@Table(name = "students")
+@Data
+public class Student {
+
+    ...
+
+    @OneToOne(optional = false, cascade = CascadeType.ALL)
+    @JoinColumn(name = "student_info_id", referencedColumnName = "id")
+    private StudentInfo info;
+}
+```
+
+Прежде всего, мы видим аннотацию `@OneToOne`, которая определяет тип отношения.
+
+Параметр `optional` говорит JPA, является ли значение в этом поле обязательным или нет.
+
+Параметр `cascade` определяет каскадные операции. В однонаправленных отношениях только одна из сторон должна быть владельцем и нести ответственность за обновление связанных полей. В этом случае владельцем выступает сущность `Student`. Каскадирование позволяет указать JPA, что необходимо "сделать со связанным объектом при выполнении операции с владельцем". В нашем случае мы указываем, что каскадно поддерживаются все операции. То есть, если из базы будет удалена запись о студенте, в таблице `student_info` будет удалена соответствующая запись о личном деле.
+
+Далее мы должны перейти в сущность `StudentInfo`, создать поле типа `Student` и указать нужные аннотации для установления связи.
+
+```java
+@Entity
+@Table(name = "student_info")
+@Data
+public class StudentInfo {
+
+    @OneToOne(mappedBy = "info")
+    private Student student;
+}
+```
+
+Мы опять же указываем аннотацию `@OneToOne`, но со стороны дочерней таблицы мы указываем аннотацию `mappedBy`, которое должно ссылаться на поле в сущности родительской таблицы, в которой установлена связь (в нашем случае, поле `info` в сущности `Student`).
+
+Добавим в базу данных запись в таблице `Student` и запись в таблице `StudentInfo` и попробуем запросить список всех студентов через Postman.
+
+<p align="center">
+  <img src="img/img_10.png" />
+</p>
+
+При выдаче мы получили бесконечную рекурсию. Это связано с тем, что при моделировании двустороннего отношения "один-к-одному", библиотека сериализации пытается сериализовать все свойства объекта, что приводит к бесконечному циклу. Для того, чтобы корректно обработать эту ситуацию, мы должны указать аннотацию `@JsonIgnore` для поля `student` в `StudentInfo`.
+
+```java
+@Entity
+@Table(name = "student_info")
+@Data
+public class StudentInfo {
+
+    ...
+
+    @OneToOne(mappedBy = "info")
+    @JsonIgnore
+    private Student student;
+}
+```
+
+Эта аннотация указывает, что нужно игнорировать сериализацию данного поля, что разорвет рекурсию и позволит получить нам корректные данные на клиенте.
+
+<p align="center">
+  <img src="img/img_11.png" />
+</p>
+
+#### Реализация отношения "один-ко-многим"
+
+Теперь реализуем отношение "один-ко-многим". Создадим сущность студенческой группы - класса `StudentGroup`. В студенческой группе может быть от 0 до N студентов.
 
 ```java
 @Entity
 @Data
-@AllArgsConstructor
-@NoArgsConstructor
-@Table(name = "groups")
-public class Group {
+@Table(name = "student_group")
+public class StudentGroup {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.SEQUENCE)
     private int id;
+
+    @Column(name = "name")
     private String name;
 
-    @OneToMany(mappedBy = "group", cascade = CascadeType.ALL)
-    private List<Student> students;
+    private Collection<Student> students;
+}
+```
 
-    public void addStudent(Student student) {
-        students.add(student);
+Согласно спецификации JPA, владельцем отношения должна быть сторона many-to-one, то есть таблица `students`.
+
+Откроем сущность `Student`, добавим поле типа `StudentGroup` и укажем нужные аннотации.
+
+```java
+@Entity
+@Table(name = "students")
+@Data
+public class Student {
+
+    ...
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "group_id", nullable = false)
+    @JsonIgnore
+    private StudentGroup studentGroup;
+}
+```
+
+Аннотация `@ManyToOne` определяет тип отношения. Не забываем про аннотацию `@JsonIgnore`.
+
+Реализуем отношение "один-ко-многим". Создадим сущность `StudentGroup` - студенческая группа. В студенческой группе может быть от 0 до N студентов. Аннотация `@JoinColumn` указывает на название колонки, которая будет служить внешним ключом.
+
+Теперь вернемся в сущность `StudentGroup` и добавим аннотации.
+
+```java
+@Entity
+@Data
+@Table(name = "student_group")
+public class StudentGroup {
+
+    ...
+
+    @OneToMany(mappedBy = "group", fetch = FetchType.EAGER)
+    private Collection<Student> students;
+}
+```
+
+Со стороны студенческой группы, отношение выглядит как "один-ко-многим", поэтому указываем эту аннотацию. Далее указываем стратегию загрузки (параметр `fetch`).
+
+Для чтение связанных объектов из БД используются следующие стратегии загрузок: EAGER и LAZY. В первом случае, объекты коллекции сразу загружаются в память, во втором случае - только при обращении к ним. 
+
+При использовании стратегии EAGER следует помнить, что если связанных объектом будет очень много, то память будет занята. В нашем случае, количество студентов в группе не может быть очень большим, поэтому можно использовать данную стратегию.
+
+При использовании стратегии LAZY для работы с объектами тратится больше ресурсов на поддержку соединений, но экономится память.
+
+```java
+@Entity
+@Data
+@Table(name = "student_group")
+public class StudentGroup {
+
+    ...
+
+    @OneToMany(mappedBy = "group", fetch = FetchType.EAGER)
+    private Collection<Student> students;
+}
+```
+
+Сделаем запрос с выводом всех студентов из базы.
+
+```json
+[
+    {
+        "id": 1,
+        "firstName": "FIRST1",
+        "lastName": "LAST1",
+        "age": 19,
+        "avgMark": 92.0,
+        "info": {
+            "id": 1,
+            "speciality": "122",
+            "department": "IS DEPT"
+        }
+    },
+    {
+        "id": 2,
+        "firstName": "FIRST2",
+        "lastName": "LAST2",
+        "age": 22,
+        "avgMark": 94.0,
+        "info": {
+            "id": 2,
+            "speciality": "122",
+            "department": "IS DEPT"
+        }
+    }
+]
+```
+
+Теперь попробуем получить сущность группы по id.
+
+Создадим репозиторий для студенческой группы
+
+```java
+public interface StudentRepository extends JpaRepository<Student, Integer> {}
+```
+
+Далее создадим сервис для студенческой группы
+
+```java
+@Service
+public class GroupService {
+
+    private GroupRepository repository;
+
+    @Autowired
+    public void setRepository(GroupRepository repository) {
+        this.repository = repository;
+    }
+
+    public Optional<StudentGroup> getGroupById(int id) {
+        return repository.findById(id);
     }
 }
 ```
 
-Обратите внимание, что отношение один-ко-многим мы моделируем с помощью обычной коллекции. Указываем аннотацию `@OneToMany`, также в свойстве mappedBy указываем, какое поле "держит" отношение со стороны студента.
+Обратите внимание, что метод репозитория возвращает тип `Optional`, который является оберткой над студенческой группой. Это связано с тем, что при поиске записи по `id`, результат может быть `null`. Для корректной обработки такой ситуации и используется тип `Optional`.
 
-Далее модифицируем класс контроллера. Создадим конечные точки для добавления новой группы, а также для получения списка всех групп. Также модифицируем конечную точку для добавления студента, чтобы указать id группы, в которую необходимо добавить студента.
+Добавим метод в класс-контроллер для получения группы по id
 
 ```java
 @RestController
-public class Controller {
+public class HelloController {
+
+    private GroupService groupService;
 
     @Autowired
-    private Service service;
-
-    @PostMapping("/student/{group_id}")
-    public void addStudent(@RequestBody Student student, @PathVariable(name = "group_id") int group_id) {
-        service.addStudent(student, group_id);
+    public void setGroupService(GroupService groupService) {
+        this.groupService = groupService;
     }
 
-    @GetMapping("/student")
-    public List<Student> getAllStudents() {
-        return service.getAllStudents();
-    }
-
-    @PostMapping("/group")
-    public void addGroup(@RequestBody Group group) {
-        service.addGroup(group);
-    }
+    ...
 
     @GetMapping("/group")
-    public List<Group> getAllGroups() {
-        return service.getAllGroups();
+    public ResponseEntity<StudentGroup> getGroupById(@RequestParam(value = "id") int id) {
+        Optional<StudentGroup> group = groupService.getGroupById(id);
+        return group.map(ResponseEntity::ok).orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).body(null));
     }
 }
 ```
 
-Теперь создадим репозиторий для сущности `Group`.
+Если мы нашли запись по `id`, тогда `Optional` будет содержать в себе объект `StudentGroup`. Если объект есть - мы передаем клиенту статус 200 и объект студенческой группы. Если объекта нет - мы возвращаем статус 404. 
 
-```java
-public interface GroupRepository extends JpaRepository<Group, Integer> {}
+Запустим приложение и получим список группы с `id=1`
+
+```json
+{
+    "id": 1,
+    "name": "AI-201",
+    "list": [
+        {
+            "id": 1,
+            "firstName": "FIRST1",
+            "lastName": "LAST1",
+            "age": 19,
+            "avgMark": 92.0,
+            "info": {
+                "id": 1,
+                "speciality": "122",
+                "department": "IS DEPT"
+            }
+        },
+        {
+            "id": 2,
+            "firstName": "FIRST2",
+            "lastName": "LAST2",
+            "age": 22,
+            "avgMark": 94.0,
+            "info": {
+                "id": 2,
+                "speciality": "122",
+                "department": "IS DEPT"
+            }
+        }
+    ]
+}
 ```
 
-Далее модифицируем класс сервиса. Добавим методы для добавления новой группы, а также для получения списка всех групп. Также модифицируем метод добавления новой группы. Метод работает следующим образом: получаем объект группы по id, после чего добавляем ссылку на группу в поле group объекта `Student`.
+Попробуем добавить студента. Вместе с запросом на добавление, мы должны передать - в какую группу нужно добавить студента.
+
+Сначала добавим в контроллер метод для добавления студента. Это будет POST-запос с полями студента в теле запроса, название группы будет указано в пути запроса.
 
 ```java
-@org.springframework.stereotype.Service
-public class Service {
+@PostMapping("/student/{group_id}")
+public void addStudent(@RequestBody Student student, @PathVariable(name = "group_id") int group_id) {
+    studentService.addStudent(student, group_id);
+}
+```
+
+Далее, в классе студенческого сервиса добавим метод `addStudent()` с двумя параметрами.
+
+```java
+@Service
+public class StudentService {
+
+    private StudentRepository repository;
 
     @Autowired
-    private StudentRepository studentRepo;
+    public void setRepository(StudentRepository repository) {
+        this.repository = repository;
+    }
 
-    @Autowired
     private GroupRepository groupRepo;
 
+    @Autowired
+    public void setGroupRepo(GroupRepository groupRepo) {
+        this.groupRepo = groupRepo;
+    }
+
     public void addStudent(Student student, int id) {
-        Group g = groupRepo.getOne(id);
-        student.setGroup(g);
-        studentRepo.save(student);
-    }
-
-    public List<Student> getAllStudents() {
-        return studentRepo.findAll();
-    }
-
-    public void addGroup(Group group) {
-        groupRepo.saveAndFlush(group);
-    }
-
-    public List<Group> getAllGroups() {
-        return groupRepo.findAll();
+        Optional<StudentGroup> g = groupRepo.findById(id);
+        
+        g.ifPresent(studentGroup -> {
+            student.setStudentGroup(studentGroup);
+            repository.save(student);
+        });
     }
 }
 ```
 
-Запустим приложение и проверим его работу. Сначала добавим группу, после чего получим список групп.
+Обратите внимание на логику работы метода. Сначала, мы получаем объект студенческой группы по `id`, после чего устанавливаем "привязку" просто с помощью сеттера поля `studentGroup`. Далее, мы сохраняем студента в базе.
 
-Добавим новую группу
-
-<p align="center">
-  <img src="img/img_06.png" />
-</p>
-
-Получим список групп
+Проверим работу приложения. Сначала добавим студента в группу с `id = 1`. Кроме самих полей студента, мы добавляем объект `info`, который будет автоматически записан в таблицу `student_info`
 
 <p align="center">
-  <img src="img/img_07.png" />
+  <img src="img/img_12.png" />
 </p>
 
-Теперь добавим нового студента
+Далее получим список студенческой группы
 
-<p align="center">
-  <img src="img/img_08.png" />
-</p>
+```json
+{
+    "id": 1,
+    "name": "AI-201",
+    "list": [
+        {
+            "id": 1,
+            "firstName": "FIRST1",
+            "lastName": "LAST1",
+            "age": 19,
+            "avgMark": 92.0,
+            "info": {
+                "id": 1,
+                "speciality": "122",
+                "department": "IS DEPT"
+            }
+        },
+        {
+            "id": 2,
+            "firstName": "FIRST2",
+            "lastName": "LAST2",
+            "age": 22,
+            "avgMark": 94.0,
+            "info": {
+                "id": 2,
+                "speciality": "122",
+                "department": "IS DEPT"
+            }
+        },
+        {
+            "id": 3,
+            "firstName": "NEW_FIRST",
+            "lastName": "NEW_SECOND",
+            "age": 22,
+            "avgMark": 100.0,
+            "info": {
+                "id": 3,
+                "speciality": "125",
+                "department": "IS DEPT"
+            }
+        }
+    ]
+}
+```
 
-Получим список всех групп
+#### Реализация отношения "многие-ко-многим"
 
-<p align="center">
-  <img src="img/img_09.png" />
-</p>
+Добавим сущность `StudentClub` (студенческий кружок). Студент может одновременно состоять в нескольких кружках, один кружок вмещает в себя несколько студентов.
+
+Создадим класс `StudentClub`, добавим коллекцию студентов и пометим ее аннотацией `@ManyToMany`.
+
+```java
+@Data
+@Entity
+@Table(name="student_club")
+public class StudentClub {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.SEQUENCE)
+    private int id;
+
+    @Column(name = "name")
+    private String name;
+
+    @ManyToMany
+    private Set<Student> students;
+}
+```
+
+То же сделаем и с классом `Student`
+
+```java
+@Entity
+@Table(name = "student")
+@Data
+public class Student {
+
+    ...
+
+    @ManyToMany
+    @JsonIgnore
+    private Set<StudentClub> clubs;
+}
+```
+
+Далее нам необходимо настроить связь. Как мы знаем, отношение многие-ко-многим моделируется с помощью отдельной таблице, каждая запись которой содержит ключи к записям двух таблиц. Эти ключи являются одновременно первичным и внешними.
+
+В качестве владельца отношения выберем студенческий кружок. Нам не надо создавать вручную третью таблицу, за нас это сделает Spring JPA. Нам нужно указать аннотацию `@JoinTable` и определить параметры новой таблицы.
+
+```java
+@Data
+@Entity
+@Table(name="student_club")
+public class StudentClub {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.SEQUENCE)
+    private int id;
+
+    @Column(name = "name")
+    private String name;
+
+    @ManyToMany
+    @JoinTable(
+            name = "club_student",
+            joinColumns = @JoinColumn(name = "club_id"),
+            inverseJoinColumns = @JoinColumn(name = "student_id")
+    )
+    private Set<Student> students;
+}
+```
+
+В параметре name указываем название таблицы, в параметр `joinColumns` указываем название колонки, которая будет содержать ключ записи `StudentClub`. Параметр `inverseJoinColumns` указывает название колонки, которая будет содержать ключ записи `Student`.
+
+В классе `Student` запишем параметр `mappedBy`, где укажем название поля в классе `StudentClub`.
+
+```java
+@Entity
+@Table(name = "student")
+@Data
+public class Student {
+
+    ...
+
+    @ManyToMany (mappedBy = "students")
+    private Set<StudentClub> clubs;
+
+    @JsonIgnore
+    public List<StudentClub> getClubs() {
+        return clubs;
+    }
+}
+```
+
+Иногда можно столкнуться с ситуацией, когда библиотека Jackson некорректно обрабатывает аннотацию `@JsonIgnore`, которая применяется к полю. В этом случае можно установить аннотацию для геттера и сеттера. В нашем случае, необходимо установить аннотацию только для геттера.
+
+Добавим метод контроллера для получения списка студентов
+
+```java
+@RestController
+public class HelloController {
+
+    private StudentService studentService;
+    private GroupService groupService;
+    private ClubService clubService;
+
+    ...
+    
+    @GetMapping("/clubs")
+    public List<StudentClub> getAllClubs() {
+        return clubService.getAllClubs();
+    }
+}
+```
+
+службу
+
+```java
+@Service
+public class ClubService {
+
+    private ClubRepository repository;
+
+    @Autowired
+    public ClubService(ClubRepository repository) {
+        this.repository = repository;
+    }
+
+    public List<StudentClub> getAllClubs() {
+        return repository.findAll();
+    }
+}
+```
+
+и репозиторий для студенческого кружка
+
+```java
+public interface ClubRepository extends JpaRepository<StudentClub, Integer> {}
+```
+
+Добавим через pgAdmin студентов и студенческие кружки и посмотрим на результат запроса на получение всех кружков.
+
+```json
+[
+    {
+        "id": 1,
+        "name": "Machine Learning",
+        "studentSet": [
+            {
+                "id": 1,
+                "firstName": "FIRST1",
+                "lastName": "LAST1",
+                "age": 19,
+                "avgMark": 92.0,
+                "info": {
+                    "id": 1,
+                    "speciality": "122",
+                    "department": "IS DEPT"
+                }
+            },
+            {
+                "id": 9,
+                "firstName": "NEW_FIRST",
+                "lastName": "NEW_SECOND",
+                "age": 22,
+                "avgMark": 100.0,
+                "info": {
+                    "id": 10,
+                    "speciality": "125",
+                    "department": "IS DEPT"
+                }
+            }
+        ]
+    },
+    {
+        "id": 2,
+        "name": "Robots",
+        "studentSet": [
+            {
+                "id": 2,
+                "firstName": "FIRST2",
+                "lastName": "LAST2",
+                "age": 22,
+                "avgMark": 94.0,
+                "info": {
+                    "id": 2,
+                    "speciality": "122",
+                    "department": "IS DEPT"
+                }
+            },
+            {
+                "id": 9,
+                "firstName": "NEW_FIRST",
+                "lastName": "NEW_SECOND",
+                "age": 22,
+                "avgMark": 100.0,
+                "info": {
+                    "id": 10,
+                    "speciality": "125",
+                    "department": "IS DEPT"
+                }
+            }
+        ]
+    }
+]
+```
